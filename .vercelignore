@@ -1,0 +1,7 @@
+backend/remind.db
+backend/__pycache__
+__pycache__
+*.pyc
+.vscode
+.git
+node_modules
