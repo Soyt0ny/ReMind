@@ -1,8 +1,15 @@
 """
 Vercel Serverless Function wrapper for FastAPI backend
 """
-from backend.main import app
+import sys
+from pathlib import Path
 
-# Vercel expects a handler function
-def handler(request, context):
-    return app(request, context)
+# Add backend directory to Python path
+backend_dir = Path(__file__).parent.parent / "backend"
+sys.path.insert(0, str(backend_dir))
+
+from main import app
+from mangum import Mangum
+
+# Create the handler for Vercel
+handler = Mangum(app, lifespan="off")

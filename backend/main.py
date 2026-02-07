@@ -285,11 +285,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Handler para Vercel Serverless
-from mangum import Mangum
-handler = Mangum(app)
-
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
