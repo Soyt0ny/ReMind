@@ -463,3 +463,9 @@ async def identify_person(request: IdentifyRequest):
         age=None,
         extra=None,
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    # El 0.0.0.0 es la clave mágica para que tu celular pueda entrar
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+    

@@ -1,5 +1,5 @@
-// Asegúrate de que esta sea la IP correcta
-const BASE_URL = 'http://192.168.1.15:8000';
+// direccion IP
+const BASE_URL = 'http://192.168.1.22:8000';
 
 export interface RegisterData {
     name: string;
