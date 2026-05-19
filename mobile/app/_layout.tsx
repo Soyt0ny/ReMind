@@ -1,24 +1,18 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setApiToken, setUnauthorizedHandler } from '../components/services/api';
 
-import { useColorScheme } from '@/components/useColorScheme';
-
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
+export { ErrorBoundary } from 'expo-router';
 
 export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
   initialRouteName: '(tabs)',
 };
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
@@ -26,34 +20,43 @@ export default function RootLayout() {
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
   });
+  const [authReady, setAuthReady] = useState(false);
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
     if (error) throw error;
   }, [error]);
 
   useEffect(() => {
-    if (loaded) {
+    if (!loaded) return;
+
+    async function initAuth() {
+      const token = await AsyncStorage.getItem('auth_token');
+      if (token) {
+        setApiToken(token);
+      }
+      // Si no hay token, la pantalla Home redirige a /login al montarse.
+      setAuthReady(true);
       SplashScreen.hideAsync();
     }
+
+    // Cuando el token expira o es invalido, volver al login.
+    setUnauthorizedHandler(() => {
+      AsyncStorage.removeItem('auth_token');
+      AsyncStorage.removeItem('user_display_name');
+      router.replace('/login');
+    });
+
+    initAuth();
   }, [loaded]);
 
-  if (!loaded) {
-    return null;
-  }
-
-  return <RootLayoutNav />;
-}
-
-function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  if (!loaded || !authReady) return null;
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </ThemeProvider>
+    <Stack>
+      <Stack.Screen name="(tabs)"   options={{ headerShown: false }} />
+      <Stack.Screen name="login"    options={{ headerShown: false }} />
+      <Stack.Screen name="identify" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="modal"    options={{ presentation: 'modal' }} />
+    </Stack>
   );
 }

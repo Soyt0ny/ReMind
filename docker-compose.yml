@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_PATH=/data/remind.db
+    volumes:
+      - remind_db:/data
+
+volumes:
+  remind_db:

@@ -1,34 +1,53 @@
 import { Tabs } from 'expo-router';
-// Importamos los íconos para que los botones de abajo se vean profesionales
 import { Ionicons } from '@expo/vector-icons';
+import { THEME } from '../../constants/Theme';
 
 export default function TabLayout() {
   return (
-    <Tabs screenOptions={{
-      // Color azul para la pestaña que esté seleccionada
-      tabBarActiveTintColor: '#007AFF',
-      // Ocultamos el título feo que pone por defecto arriba, porque nosotros ya hicimos el nuestro
-      headerShown: false,
-    }}>
-
-      {/* 1. PESTAÑA DE IDENTIFICAR (Nuestra cámara) */}
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor:   THEME.colors.primary,
+        tabBarInactiveTintColor: THEME.colors.textMuted,
+        tabBarStyle: {
+          backgroundColor: THEME.colors.card,
+          borderTopColor:  THEME.colors.border,
+          height: 64,
+          paddingBottom: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize:   12,
+          fontWeight: '600',
+        },
+        headerShown: false,
+      }}
+    >
       <Tabs.Screen
-        name="index" // Apunta al archivo index.tsx
+        name="index"
         options={{
-          title: 'Identificar',
-          tabBarIcon: ({ color }) => <Ionicons name="scan-outline" size={24} color={color} />,
+          title: 'Inicio',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
         }}
       />
-
-      {/* 2. PESTAÑA DE REGISTRO */}
       <Tabs.Screen
-        name="register" // Apuntará al archivo register.tsx que vamos a crear en el Paso 2
+        name="two"
         options={{
-          title: 'Registrar',
-          tabBarIcon: ({ color }) => <Ionicons name="person-add-outline" size={24} color={color} />,
+          title: 'Contactos',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people-outline" size={size} color={color} />
+          ),
         }}
       />
-
+      <Tabs.Screen
+        name="register"
+        options={{
+          title: 'Agregar',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-add-outline" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

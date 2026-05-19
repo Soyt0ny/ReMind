@@ -1,49 +1,185 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Header } from "@/components/remind/header"
 import { Navigation } from "@/components/remind/navigation"
 import { CameraCapture } from "@/components/remind/camera-capture"
 import { RegisterForm } from "@/components/remind/register-form"
+import { EditPersonForm } from "@/components/remind/edit-person-form"
+import { HomeScreen, type RecentIdent } from "@/components/remind/home-screen"
+import { PeopleList, type Person } from "@/components/remind/people-list"
+import { LoginForm } from "@/components/remind/login-form"
+import { PasswordModal } from "@/components/remind/password-modal"
+import type { IdentificationResult } from "@/components/remind/identification-card"
+import { getToken, getDisplayName, clearSession } from "@/lib/auth"
 
-type View = "identify" | "register"
+type View = "home" | "identify" | "contacts" | "register" | "edit" | "settings"
+type AuthState = "loading" | "authenticated" | "unauthenticated"
 
 export default function Page() {
-  const [activeView, setActiveView] = useState<View>("identify")
+  const [authState, setAuthState]   = useState<AuthState>("loading")
+  const [displayName, setDisplayName] = useState("")
+  const [view, setView]             = useState<View>("home")
+  const [recentIdentifications, setRecentIdentifications] = useState<RecentIdent[]>(() => {
+    if (typeof window === "undefined") return []
+    try {
+      const stored = localStorage.getItem("remind_history")
+      if (!stored) return []
+      const parsed: RecentIdent[] = JSON.parse(stored)
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+      return parsed.filter(r => r.timestamp > cutoff)
+    } catch { return [] }
+  })
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null)
+  const lastIdentifiedRef = useRef<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+
+  function requirePassword(action: () => void) {
+    setPendingAction(() => action)
+  }
+
+  useEffect(() => {
+    const token = getToken()
+    if (token) {
+      setDisplayName(getDisplayName() ?? "")
+      setAuthState("authenticated")
+    } else {
+      setAuthState("unauthenticated")
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem("remind_history", JSON.stringify(recentIdentifications))
+  }, [recentIdentifications])
+
+  function handleLogout() {
+    clearSession()
+    setAuthState("unauthenticated")
+    setDisplayName("")
+    setView("home")
+  }
+
+  function handleIdentified(result: IdentificationResult) {
+    const key = `${result.name}|${result.relationship}`
+    if (lastIdentifiedRef.current === key) return
+    lastIdentifiedRef.current = key
+    setRecentIdentifications(prev =>
+      [{ ...result, timestamp: Date.now() }, ...prev].slice(0, 50)
+    )
+  }
+
+  function handlePersonLost() {
+    lastIdentifiedRef.current = null
+  }
+
+  if (authState === "loading") return null
+
+  if (authState === "unauthenticated") {
+    return (
+      <LoginForm
+        onAuth={(name) => {
+          setDisplayName(name)
+          setAuthState("authenticated")
+        }}
+      />
+    )
+  }
+
+  if (view === "identify") {
+    return (
+      <div className="relative flex min-h-[100dvh] max-w-md mx-auto flex-col overflow-hidden">
+        <CameraCapture
+          onBack={() => setView("home")}
+          onRegister={() => setView("register")}
+          onIdentified={handleIdentified}
+          onPersonLost={handlePersonLost}
+        />
+      </div>
+    )
+  }
+
+  if (view === "register") {
+    return (
+      <div className="relative flex min-h-[100dvh] max-w-md mx-auto flex-col bg-[#f6f7f8] overflow-x-hidden">
+        <Header onBack={() => setView("contacts")} />
+        <RegisterForm
+          onRegistered={() => setView("contacts")}
+          onBack={() => setView("contacts")}
+        />
+      </div>
+    )
+  }
+
+  if (view === "edit" && editingPerson) {
+    return (
+      <div className="relative flex min-h-[100dvh] max-w-md mx-auto flex-col bg-[#f6f7f8] overflow-x-hidden">
+        <Header onBack={() => setView("contacts")} />
+        <EditPersonForm
+          person={editingPerson}
+          onSaved={() => setView("contacts")}
+        />
+      </div>
+    )
+  }
+
+  const activeTab = (
+    view === "contacts" ? "contacts" : view === "settings" ? "settings" : "home"
+  ) as "home" | "contacts" | "settings"
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-6">
-        <div className="lg:hidden">
-          <Navigation activeView={activeView} onChangeView={setActiveView} />
-        </div>
+    <div className="relative flex min-h-[100dvh] max-w-md mx-auto flex-col bg-[#f6f7f8] overflow-x-hidden">
+      {view !== "contacts" && (
+        <Header
+          title={view === "settings" ? "Ajustes" : "ReMind"}
+          onBack={view === "settings" ? () => setView("home") : undefined}
+          onSettings={view === "home" ? () => setView("settings") : undefined}
+        />
+      )}
 
-        {/*
-          Responsive content:
-          - On small screens show a single panel based on `activeView`.
-          - On md+ screens show both panels side-by-side (camera left, register right).
-        */}
-        <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div
-            className={`animate-slide-up ${activeView === "identify" ? "" : "hidden"} lg:block lg:col-span-2`}
-          >
-            <CameraCapture />
+      <div className="flex-1 flex flex-col overflow-y-auto">
+        {view === "home" && (
+          <HomeScreen
+            displayName={displayName}
+            recentIdentifications={recentIdentifications}
+            onIdentify={() => setView("identify")}
+          />
+        )}
+
+        {view === "contacts" && (
+          <PeopleList
+            onAddContact={() => requirePassword(() => setView("register"))}
+            onEditContact={(person) => requirePassword(() => { setEditingPerson(person); setView("edit") })}
+          />
+        )}
+
+        {view === "settings" && (
+          <div className="flex-1 flex flex-col px-6 pt-8 gap-6">
+            <p className="text-sm font-medium text-gray-500">
+              Sesión iniciada como{" "}
+              <span className="font-bold text-[#111418]">{displayName}</span>
+            </p>
+            <button
+              onClick={handleLogout}
+              className="w-full h-14 flex items-center justify-center gap-3 rounded-xl bg-red-50 text-red-600 font-bold text-base border border-red-100 hover:bg-red-100 transition-colors active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-xl">logout</span>
+              Cerrar sesión
+            </button>
           </div>
+        )}
+      </div>
 
-          <div
-            className={`animate-slide-up ${activeView === "register" ? "" : "hidden"} lg:block lg:col-span-1`}
-          >
-            <RegisterForm onRegistered={() => setActiveView("identify")} />
-          </div>
-        </div>
+      <Navigation
+        active={activeTab}
+        onChange={(tab) => setView(tab as View)}
+      />
 
-        <footer className="mt-8 pb-4 text-center">
-          <p className="text-xs text-muted-foreground/60">
-            ReMind &middot; Asistente Visual de Memoria
-          </p>
-        </footer>
-      </main>
+      {pendingAction && (
+        <PasswordModal
+          onConfirmed={() => { pendingAction(); setPendingAction(null) }}
+          onCancel={() => setPendingAction(null)}
+        />
+      )}
     </div>
   )
 }

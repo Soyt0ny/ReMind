@@ -1,23 +1,40 @@
-import { StyleSheet, View, Text } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView } from 'react-native';
 import RegisterForm from '../../components/RegisterForm';
+import { THEME } from '../../constants/Theme';
 
 export default function RegisterScreen() {
-    return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.title}>ReMind</Text>
-                <Text style={styles.subtitle}>Registro de Familiares</Text>
-            </View>
-
-            {/* Aquí metemos el formulario que creamos arriba */}
-            <RegisterForm />
-        </View>
-    );
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Agregar Familiar</Text>
+        <Text style={styles.subtitle}>
+          Registra a una persona para que ReMind pueda reconocerla.
+        </Text>
+      </View>
+      <RegisterForm />
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F3F4F6', paddingTop: 60, paddingHorizontal: 20 },
-    header: { alignItems: 'center', marginBottom: 15 },
-    title: { fontSize: 32, fontWeight: '900', color: '#111827' },
-    subtitle: { fontSize: 14, color: '#6B7280' },
+  safe: {
+    flex: 1,
+    backgroundColor: THEME.colors.background,
+  },
+  header: {
+    paddingHorizontal: THEME.spacing.lg,
+    paddingTop: THEME.spacing.md,
+    paddingBottom: THEME.spacing.sm,
+  },
+  title: {
+    fontSize: THEME.fontSize.xxl,
+    fontWeight: THEME.fontWeight.black,
+    color: THEME.colors.text,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: THEME.fontSize.sm,
+    color: THEME.colors.textMuted,
+    lineHeight: 20,
+  },
 });

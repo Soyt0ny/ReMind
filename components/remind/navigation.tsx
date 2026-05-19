@@ -1,48 +1,38 @@
 "use client"
 
-import { Camera, UserPlus } from "lucide-react"
-import { Button } from "@/components/ui/button"
-
-type View = "identify" | "register"
+type Tab = "home" | "contacts" | "settings"
 
 interface NavigationProps {
-  activeView: View
-  onChangeView: (view: View) => void
+  active: Tab
+  onChange: (tab: Tab) => void
 }
 
-export function Navigation({ activeView, onChangeView }: NavigationProps) {
+export function Navigation({ active, onChange }: NavigationProps) {
+  const tabs: { id: Tab; icon: string; label: string }[] = [
+    { id: "home",     icon: "home",     label: "Inicio"    },
+    { id: "contacts", icon: "contacts", label: "Contactos" },
+    { id: "settings", icon: "settings", label: "Ajustes"   },
+  ]
+
   return (
-    <nav
-      className="flex gap-2 rounded-2xl bg-secondary/60 p-1.5 shadow-sm backdrop-blur-sm"
-      role="navigation"
-      aria-label="Navegacion principal"
-    >
-      <Button
-        onClick={() => onChangeView("identify")}
-        size="lg"
-        className={`h-14 flex-1 gap-2.5 rounded-xl text-base font-bold transition-all duration-200 md:text-lg ${
-          activeView === "identify"
-            ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90"
-            : "bg-transparent text-muted-foreground shadow-none hover:bg-secondary hover:text-foreground"
-        }`}
-        aria-current={activeView === "identify" ? "page" : undefined}
-      >
-        <Camera className="h-5 w-5 md:h-6 md:w-6" aria-hidden="true" />
-        Identificar
-      </Button>
-      <Button
-        onClick={() => onChangeView("register")}
-        size="lg"
-        className={`h-14 flex-1 gap-2.5 rounded-xl text-base font-bold transition-all duration-200 md:text-lg ${
-          activeView === "register"
-            ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90"
-            : "bg-transparent text-muted-foreground shadow-none hover:bg-secondary hover:text-foreground"
-        }`}
-        aria-current={activeView === "register" ? "page" : undefined}
-      >
-        <UserPlus className="h-5 w-5 md:h-6 md:w-6" aria-hidden="true" />
-        Registrar
-      </Button>
+    <nav className="fixed bottom-0 w-full max-w-md mx-auto bg-white border-t border-gray-100 pb-safe pt-2 px-6 z-50">
+      <div className="flex justify-around items-center h-16 pb-2">
+        {tabs.map(({ id, icon, label }) => (
+          <button
+            key={id}
+            onClick={() => onChange(id)}
+            className={`flex flex-col items-center gap-0.5 p-2 transition-colors ${
+              active === id ? "text-[#137fec]" : "text-gray-400 hover:text-gray-600"
+            }`}
+            aria-current={active === id ? "page" : undefined}
+          >
+            <span className={`material-symbols-outlined text-[28px] ${active === id ? "filled" : ""}`}>
+              {icon}
+            </span>
+            <span className={`text-xs ${active === id ? "font-bold" : "font-medium"}`}>{label}</span>
+          </button>
+        ))}
+      </div>
     </nav>
   )
 }

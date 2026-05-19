@@ -2,11 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from "react"
 import { authFetch } from "@/lib/auth"
-
-interface RegisterFormProps {
-  onRegistered?: () => void
-  onBack?: () => void
-}
+import type { Person } from "./people-list"
 
 const RELATIONSHIPS = [
   "Esposo / Esposa",
@@ -19,7 +15,12 @@ const RELATIONSHIPS = [
   "Otro",
 ]
 
-export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
+interface EditPersonFormProps {
+  person: Person
+  onSaved?: () => void
+}
+
+export function EditPersonForm({ person, onSaved }: EditPersonFormProps) {
   const videoRef     = useRef<HTMLVideoElement>(null)
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const streamRef    = useRef<MediaStream | null>(null)
@@ -38,12 +39,12 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
     e.target.value = ""
   }
 
-  const [name, setName]               = useState("")
-  const [relationship, setRelationship] = useState("")
-  const [age, setAge]                 = useState("")
-  const [phone, setPhone]             = useState("")
-  const [extra, setExtra]             = useState("")
-  const [isEmergency, setIsEmergency] = useState(false)
+  const [name, setName]               = useState(person.name)
+  const [relationship, setRelationship] = useState(person.relationship)
+  const [age, setAge]                 = useState(person.age?.toString() ?? "")
+  const [phone, setPhone]             = useState(person.phone ?? "")
+  const [extra, setExtra]             = useState(person.extra ?? "")
+  const [isEmergency, setIsEmergency] = useState(person.is_emergency ?? false)
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [isCameraOn, setIsCameraOn]   = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -76,56 +77,58 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
 
   const capturePhoto = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return
-    const video = videoRef.current
     const canvas = canvasRef.current
     const ctx = canvas.getContext("2d")
     if (!ctx) return
-    canvas.width = video.videoWidth || 640
-    canvas.height = video.videoHeight || 480
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    canvas.width  = videoRef.current.videoWidth  || 640
+    canvas.height = videoRef.current.videoHeight || 480
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
     setCapturedImage(canvas.toDataURL("image/jpeg", 0.9))
     stopCamera()
   }, [stopCamera])
 
   const handleSubmit = useCallback(async () => {
-    if (!capturedImage || !name.trim() || !relationship.trim()) {
-      setMessage({ type: "error", text: "Completá el nombre, la relación y tomá una foto." })
+    if (!name.trim() || !relationship.trim()) {
+      setMessage({ type: "error", text: "Completá el nombre y la relación." })
       return
     }
     setIsSubmitting(true)
     setMessage(null)
     try {
-      const res = await authFetch("/register", {
-        method:  "POST",
+      const body: Record<string, unknown> = {
+        name:         name.trim(),
+        relationship: relationship.trim(),
+        age:          age   ? Number(age) : null,
+        phone:        phone.trim() || null,
+        extra:        extra.trim() || null,
+      }
+      if (capturedImage) body.image = capturedImage
+      body.is_emergency = isEmergency
+
+      const res = await authFetch(`/people/${person.id}`, {
+        method:  "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name:         name.trim(),
-          relationship: relationship.trim(),
-          image:        capturedImage,
-          age:          age   ? Number(age) : null,
-          phone:        phone.trim() || null,
-          extra:        extra.trim() || null,
-          is_emergency: isEmergency,
-        }),
+        body:    JSON.stringify(body),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => null)
-        throw new Error(err?.detail || "Error al registrar")
+        throw new Error(err?.detail || "Error al actualizar")
       }
-      setMessage({ type: "success", text: `${name} registrado exitosamente.` })
-      setName(""); setRelationship(""); setAge(""); setPhone(""); setExtra(""); setCapturedImage(null); setIsEmergency(false)
-      onRegistered?.()
+      setMessage({ type: "success", text: `${name.trim()} actualizado exitosamente.` })
+      onSaved?.()
     } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "Error al registrar." })
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Error al actualizar." })
     } finally {
       setIsSubmitting(false)
     }
-  }, [capturedImage, name, relationship, age, phone, extra, isEmergency, onRegistered])
+  }, [capturedImage, name, relationship, age, phone, extra, isEmergency, person.id, onSaved])
+
+  const displayPhoto = capturedImage ?? person.photo ?? null
 
   return (
     <div className="flex-1 flex flex-col w-full pb-8">
       <div className="px-4 pt-6">
-        <h2 className="text-2xl font-bold mb-6 text-[#111418]">¿Quién es esta persona?</h2>
+        <h2 className="text-2xl font-bold mb-6 text-[#111418]">Editar persona</h2>
 
         <div className="flex flex-col gap-5">
           {/* Name */}
@@ -160,7 +163,7 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
             </div>
           </label>
 
-          {/* Age (optional) */}
+          {/* Age */}
           <label className="flex flex-col gap-2">
             <span className="text-base font-medium text-[#111418] pl-1">Edad (opcional)</span>
             <input
@@ -173,7 +176,7 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
             />
           </label>
 
-          {/* Phone (optional) */}
+          {/* Phone */}
           <label className="flex flex-col gap-2">
             <span className="text-base font-medium text-[#111418] pl-1">Teléfono (opcional)</span>
             <div className="relative">
@@ -188,14 +191,12 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
             </div>
           </label>
 
-          {/* Emergency contact toggle */}
+          {/* Emergency toggle */}
           <button
             type="button"
             onClick={() => setIsEmergency(v => !v)}
             className={`flex items-center justify-between w-full rounded-xl px-4 py-4 border-2 transition-colors ${
-              isEmergency
-                ? "border-red-400 bg-red-50"
-                : "border-gray-200 bg-white"
+              isEmergency ? "border-red-400 bg-red-50" : "border-gray-200 bg-white"
             }`}
           >
             <div className="flex items-center gap-3">
@@ -218,70 +219,55 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
 
       {/* Photo section */}
       <div className="px-4 pt-8">
-        <h2 className="text-2xl font-bold mb-2 text-[#111418]">Agregar foto</h2>
-        <p className="text-gray-500 mb-5 text-sm">Agregá una foto clara del rostro para un mejor reconocimiento.</p>
+        <h2 className="text-2xl font-bold mb-2 text-[#111418]">Foto</h2>
+        <p className="text-gray-500 mb-5 text-sm">Tomá una nueva foto o mantené la actual.</p>
 
-        {/* Camera preview / captured */}
-        {(isCameraOn || capturedImage) && (
+        {displayPhoto && !isCameraOn && (
           <div className="relative overflow-hidden rounded-2xl border-2 border-gray-200 bg-gray-100 mb-4 aspect-video">
-            <video
-              ref={videoRef}
-              autoPlay playsInline muted
-              className={`w-full h-full object-cover ${!isCameraOn || capturedImage ? "hidden" : ""}`}
-            />
+            <img src={displayPhoto} alt="Foto actual" className="w-full h-full object-cover" />
             {capturedImage && (
-              <img src={capturedImage} alt="Foto capturada" className="w-full h-full object-cover" />
+              <span className="absolute top-3 left-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                Nueva foto
+              </span>
             )}
           </div>
         )}
 
-        {isCameraOn && !capturedImage && (
+        {isCameraOn && (
+          <div className="relative overflow-hidden rounded-2xl border-2 border-gray-200 bg-gray-100 mb-4 aspect-video">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+          </div>
+        )}
+
+        {isCameraOn ? (
           <button
             onClick={capturePhoto}
             className="w-full h-14 bg-[#137fec] hover:bg-blue-600 text-white rounded-xl text-lg font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] mb-4"
           >
             <span className="material-symbols-outlined text-[24px]">camera</span>
-            Tomar Foto
+            Tomar foto
           </button>
-        )}
-
-        {!isCameraOn && !capturedImage && (
-          <div className="grid grid-cols-2 gap-4 mb-4">
+        ) : (
+          <div className="grid grid-cols-2 gap-3 mb-4">
             <button
               onClick={startCamera}
-              className="relative aspect-[4/5] w-full rounded-2xl border-2 border-dashed border-[#137fec]/40 bg-[#137fec]/5 hover:bg-[#137fec]/10 active:scale-95 transition-all flex flex-col items-center justify-center gap-3 group"
+              className="h-12 border-2 border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
             >
-              <div className="w-14 h-14 rounded-full bg-white flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                <span className="material-symbols-outlined text-[#137fec] text-3xl">add_a_photo</span>
-              </div>
-              <span className="text-[#137fec] font-semibold text-base text-center px-2">Tomar Foto</span>
+              <span className="material-symbols-outlined text-lg">add_a_photo</span>
+              {capturedImage ? "Retomar" : "Cámara"}
             </button>
-
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="relative aspect-[4/5] w-full rounded-2xl border-2 border-dashed border-gray-200 bg-white hover:bg-gray-50 active:scale-95 transition-all flex flex-col items-center justify-center gap-3 group"
+              className="h-12 border-2 border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
             >
-              <div className="w-14 h-14 rounded-full bg-gray-50 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                <span className="material-symbols-outlined text-gray-400 text-3xl group-hover:text-[#137fec] transition-colors">add_photo_alternate</span>
-              </div>
-              <span className="text-gray-400 group-hover:text-[#137fec] font-semibold text-base text-center px-2 transition-colors">Subir Foto</span>
+              <span className="material-symbols-outlined text-lg">add_photo_alternate</span>
+              Subir foto
             </button>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
           </div>
         )}
-
-        {capturedImage && (
-          <button
-            onClick={() => setCapturedImage(null)}
-            className="w-full h-12 border-2 border-gray-200 rounded-xl text-base font-semibold text-gray-600 hover:bg-gray-50 transition-colors mb-4 flex items-center justify-center gap-2"
-          >
-            <span className="material-symbols-outlined text-lg">refresh</span>
-            Tomar otra foto
-          </button>
-        )}
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
       </div>
 
-      {/* Feedback */}
       {message && (
         <div className={`mx-4 mb-4 rounded-xl px-4 py-3 text-center text-sm font-semibold ${
           message.type === "success"
@@ -292,11 +278,10 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
         </div>
       )}
 
-      {/* Save button */}
       <div className="px-4 pt-4 mt-auto">
         <button
           onClick={handleSubmit}
-          disabled={isSubmitting || !capturedImage || !name.trim() || !relationship}
+          disabled={isSubmitting || !name.trim() || !relationship}
           className="w-full h-16 bg-[#137fec] hover:bg-blue-600 text-white rounded-xl text-xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isSubmitting ? (
@@ -304,7 +289,7 @@ export function RegisterForm({ onRegistered, onBack }: RegisterFormProps) {
           ) : (
             <>
               <span className="material-symbols-outlined text-[28px]">save</span>
-              Guardar
+              Guardar cambios
             </>
           )}
         </button>

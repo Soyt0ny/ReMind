@@ -1,38 +1,119 @@
-// direccion IP
-const BASE_URL = 'http://192.168.1.22:8000';
+// Cambia esta IP por la de tu computadora en la misma red WiFi.
+// Para encontrarla: `ip addr` (Linux/Mac) o `ipconfig` (Windows).
+// También podés crear un archivo mobile/.env con EXPO_PUBLIC_API_URL=http://tu-ip:8000
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://192.168.1.22:8000';
 
-export interface RegisterData {
-    name: string;
-    relationship: string;
-    image: string;
-    extra?: string; // <-- Le decimos que ahora también mandamos características
+// Token JWT activo — se carga desde AsyncStorage al iniciar la app.
+let _token: string | null = null;
+let _onUnauthorized: (() => void) | null = null;
+
+export function setApiToken(token: string | null) {
+  _token = token;
 }
 
-export const api = {
-    register: async (data: RegisterData) => {
-        try {
-            console.log("Enviando datos a:", BASE_URL); // Para ver en la terminal si intenta conectar
+export function setUnauthorizedHandler(handler: () => void) {
+  _onUnauthorized = handler;
+}
 
-            const response = await fetch(`${BASE_URL}/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data),
-            });
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (_token) headers['Authorization'] = `Bearer ${_token}`;
 
-            // Si el servidor de Python nos batea (error 400, 422, 500)
-            if (!response.ok) {
-                // Leemos el error como texto puro para que ya no diga [object Object]
-                const errText = await response.text();
-                console.error("El servidor de Python respondió con error:", errText);
-                throw new Error("El servidor rechazó los datos. Revisa la terminal.");
-            }
+  const response = await fetch(`${BASE_URL}${path}`, {
+    headers,
+    ...options,
+  });
 
-            return await response.json();
-        } catch (error) {
-            console.error("Fallo la conexión:", error);
-            throw error;
-        }
+  if (!response.ok) {
+    if (response.status === 401) {
+      _token = null;
+      _onUnauthorized?.();
+      throw new Error('UNAUTHORIZED');
     }
+    const text = await response.text();
+    throw new Error(text || `Error ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface TokenResponse {
+  access_token: string;
+  token_type:   string;
+  user_id:      number;
+  display_name: string;
+}
+
+export interface RegisterData {
+  name:         string;
+  relationship: string;
+  image:        string;
+  age?:         number;
+  extra?:       string;
+  phone?:       string;
+}
+
+export interface IdentifyResult {
+  name:         string;
+  relationship: string;
+  confidence:   number;
+  age?:         number;
+  extra?:       string;
+  photo?:       string;
+  timestamp?:   number;
+}
+
+export interface Person {
+  id:           number;
+  name:         string;
+  relationship: string;
+  age?:         number;
+  extra?:       string;
+  phone?:       string;
+  photo?:       string;
+  created_at:   string;
+}
+
+
+// ---------------------------------------------------------------------------
+// API calls
+// ---------------------------------------------------------------------------
+
+export const api = {
+  // Auth — estos dos no requieren token
+  authRegister: (email: string, displayName: string, password: string) =>
+    request<TokenResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, display_name: displayName, password }),
+    }),
+
+  authLogin: (email: string, password: string) =>
+    request<TokenResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  me: () =>
+    request<{ id: number; email: string; display_name: string }>('/auth/me'),
+
+  // People — todos requieren token
+  register: (data: RegisterData) =>
+    request('/register', { method: 'POST', body: JSON.stringify(data) }),
+
+  identify: (imageBase64: string) =>
+    request<IdentifyResult>('/identify', {
+      method: 'POST',
+      body: JSON.stringify({ image: imageBase64 }),
+    }),
+
+  getPeople: () =>
+    request<Person[]>('/people'),
+
+  deletePerson: (id: number) =>
+    request(`/people/${id}`, { method: 'DELETE' }),
 };

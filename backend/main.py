@@ -3,267 +3,56 @@ ReMind - Backend FastAPI
 Asistente Visual de Memoria para personas con Alzheimer.
 """
 
-import os
-import base64
 import logging
-from io import BytesIO
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import cv2
 import numpy as np
-import face_recognition
-import sqlite3
-import json
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite://./backend/remind.db",
+from auth     import create_token, get_current_user, hash_password, verify_password
+from database import (
+    delete_all_people,
+    delete_person,
+    get_all_people,
+    get_embeddings_cached,
+    get_person_by_id,
+    get_person_photo,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_password_hash,
+    create_user,
+    init_db,
+    invalidate_cache,
+    save_person,
+    update_person_metadata,
 )
-IDENTIFICATION_THRESHOLD = float(os.getenv("IDENTIFICATION_THRESHOLD", "0.6"))
+from schemas  import (
+    DeleteResponse,
+    IdentifyRequest,
+    IdentifyResponse,
+    LoginRequest,
+    RegisterRequest,
+    RegisterResponse,
+    RegisterUserRequest,
+    TokenResponse,
+    UpdatePersonRequest,
+    UpdatePersonResponse,
+    VerifyRequest,
+)
+from vision   import augment_embedding, create_thumbnail, decode_base64_image, face_model
+
+IDENTIFICATION_THRESHOLD = float(__import__("os").getenv("IDENTIFICATION_THRESHOLD", "0.6"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("remind")
 
 
-# ---------------------------------------------------------------------------
-# Singleton: Face Recognition Model Loader
-# ---------------------------------------------------------------------------
-
-class FaceRecognitionSingleton:
-    """
-    Singleton que garantiza que el modelo de face_recognition (dlib)
-    se carga una sola vez al inicio del servidor.
-    """
-
-    _instance: Optional["FaceRecognitionSingleton"] = None
-    _initialized: bool = False
-
-    def __new__(cls) -> "FaceRecognitionSingleton":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def initialize(self) -> None:
-        if not self._initialized:
-            logger.info("Cargando modelo de reconocimiento facial (dlib)...")
-            # Forzar la carga del modelo ejecutando una codificación dummy
-            _dummy = np.zeros((100, 100, 3), dtype=np.uint8)
-            face_recognition.face_encodings(
-                face_recognition.load_image_file(BytesIO(cv2.imencode(".jpg", _dummy)[1]))
-            ) if False else None  # noqa: el modelo se pre-carga con la importación
-            self._initialized = True
-            logger.info("Modelo de reconocimiento facial cargado correctamente.")
-
-    def get_encodings(self, image: np.ndarray) -> list[np.ndarray]:
-        """Detecta rostros y devuelve sus embeddings de 128-d."""
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_image, model="hog")
-        encodings = face_recognition.face_encodings(rgb_image, face_locations)
-        return encodings
-
-
-face_model = FaceRecognitionSingleton()
-
-
-# ---------------------------------------------------------------------------
-# Database helpers
-# ---------------------------------------------------------------------------
-
-def get_db_connection():
-    """Crea y retorna una conexión a SQLite (archivo `backend/remind.db`)."""
-    db_path = os.path.join(os.path.dirname(__file__), "remind.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_sqlite_db():
-    """Crea las tablas necesarias en SQLite si no existen."""
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        # Create table with new columns if it doesn't exist
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                relationship TEXT NOT NULL,
-                age INTEGER,
-                extra TEXT,
-                embedding TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_people_name ON people (name)")
-
-        # Migration for existing databases: ensure `age` and `extra` columns exist.
-        # SQLite doesn't support DROP COLUMN; we only add missing columns.
-        cur.execute("PRAGMA table_info(people)")
-        cols = [r[1] for r in cur.fetchall()]
-        if "age" not in cols:
-            cur.execute("ALTER TABLE people ADD COLUMN age INTEGER")
-        if "extra" not in cols:
-            cur.execute("ALTER TABLE people ADD COLUMN extra TEXT")
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def fetch_all_embeddings() -> list[dict]:
-    """Obtiene todos los registros con sus embeddings de la base de datos."""
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT id, name, relationship, age, extra, embedding FROM people")
-        rows = cur.fetchall()
-        results = []
-        for row in rows:
-            emb_text = row["embedding"]
-            try:
-                emb_list = json.loads(emb_text)
-            except Exception:
-                # Fallback: stored as repr() or comma-separated
-                emb_list = list(map(float, emb_text.strip('[]').split(','))) if emb_text else []
-
-            results.append({
-                "id": row["id"],
-                "name": row["name"],
-                "relationship": row["relationship"],
-                "age": row["age"],
-                "extra": row["extra"],
-                "embedding": np.array(emb_list, dtype=np.float64),
-            })
-        return results
-    finally:
-        conn.close()
-
-
-def save_person(name: str, relationship: str, embeddings: list[list[float]], age: Optional[int] = None, extra: Optional[str] = None) -> int:
-    """Guarda una persona y sus embeddings augmentados en la base de datos."""
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        person_id = None
-        for i, emb in enumerate(embeddings):
-            emb_text = json.dumps(emb)
-            cur.execute(
-                "INSERT INTO people (name, relationship, age, extra, embedding) VALUES (?, ?, ?, ?, ?)",
-                (name, relationship, age, extra, emb_text),
-            )
-            if person_id is None:
-                person_id = cur.lastrowid
-        conn.commit()
-        return person_id
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Error al guardar persona: {e}")
-        raise
-    finally:
-        conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Image helpers
-# ---------------------------------------------------------------------------
-
-def decode_base64_image(base64_string: str) -> np.ndarray:
-    """Decodifica una imagen en base64 a un array NumPy (BGR)."""
-    # Remover el prefijo data:image/...;base64, si existe
-    if "," in base64_string:
-        base64_string = base64_string.split(",", 1)[1]
-
-    image_bytes = base64.b64decode(base64_string)
-    np_array = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-
-    if image is None:
-        raise ValueError("No se pudo decodificar la imagen.")
-
-    return image
-
-
-def augment_embedding(embedding: np.ndarray, num_variations: int = 3) -> list[np.ndarray]:
-    """
-    Aplica Data Augmentation simple al embedding.
-    Genera variaciones añadiendo ruido gaussiano pequeño para simular
-    cambios leves de brillo/contraste.
-    """
-    augmented = [embedding.tolist()]
-    for i in range(1, num_variations):
-        noise = np.random.normal(0, 0.01 * i, embedding.shape)
-        varied = embedding + noise
-        # Normalizar para mantener la magnitud similar
-        varied = varied / np.linalg.norm(varied) * np.linalg.norm(embedding)
-        augmented.append(varied.tolist())
-    return augmented
-
-
-# ---------------------------------------------------------------------------
-# Pydantic Schemas
-# ---------------------------------------------------------------------------
-
-class RegisterRequest(BaseModel):
-    """Esquema para registrar una nueva persona."""
-    name: str = Field(..., min_length=1, max_length=200, description="Nombre de la persona")
-    relationship: str = Field(
-        ..., min_length=1, max_length=100, description="Parentesco (ej: Hija, Esposo, Doctor)"
-    )
-    image: str = Field(..., description="Imagen en base64 del rostro")
-    age: Optional[int] = Field(None, description="Edad (opcional)")
-    extra: Optional[str] = Field(None, max_length=1000, description="Información extra (campo libre)")
-
-
-class RegisterResponse(BaseModel):
-    """Respuesta del registro exitoso."""
-    message: str
-    person_id: int
-    name: str
-    relationship: str
-    age: Optional[int] = None
-    extra: Optional[str] = None
-
-
-class IdentifyRequest(BaseModel):
-    """Esquema para identificar un rostro."""
-    image: str = Field(..., description="Frame de video en base64")
-
-
-class IdentifyResponse(BaseModel):
-    """Respuesta de identificación."""
-    name: str
-    relationship: str
-    confidence: float = Field(
-        ..., description="Distancia euclidiana (menor = más confianza)"
-    )
-    age: Optional[int] = None
-    extra: Optional[str] = None
-
-
-class DeleteResponse(BaseModel):
-    message: str
-    deleted: int
-
-
-# ---------------------------------------------------------------------------
-# FastAPI App
-# ---------------------------------------------------------------------------
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Inicializa el modelo de reconocimiento facial al arrancar."""
     face_model.initialize()
-    # Inicializar base de datos SQLite local
-    init_sqlite_db()
+    init_db()
     logger.info("ReMind Backend iniciado correctamente.")
     yield
     logger.info("ReMind Backend detenido.")
@@ -272,200 +61,241 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ReMind API",
     description="API de asistencia visual para personas con Alzheimer.",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-# CORS - permitir el frontend Next.js
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Health
 # ---------------------------------------------------------------------------
 
 @app.get("/")
 async def root():
-    """Health check."""
     return {"status": "ok", "message": "ReMind API activa"}
 
 
-@app.get("/people")
-async def list_people():
-    """Lista las personas registradas (sin embeddings)."""
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/register", response_model=TokenResponse)
+async def register_account(body: RegisterUserRequest):
+    if get_user_by_email(body.email):
+        raise HTTPException(status_code=409, detail="Ya existe una cuenta con ese correo.")
+    pw_hash = hash_password(body.password)
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id, name, relationship, age, extra, created_at FROM people ORDER BY id")
-        rows = cur.fetchall()
-        result = [ {"id": row["id"], "name": row["name"], "relationship": row["relationship"], "age": row["age"], "extra": row["extra"], "created_at": row["created_at"]} for row in rows ]
-        return result
-    finally:
-        conn.close()
+        user_id = create_user(body.email, body.display_name, pw_hash)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error al crear la cuenta.")
+    return TokenResponse(
+        access_token=create_token(user_id),
+        user_id=user_id,
+        display_name=body.display_name,
+    )
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(body: LoginRequest):
+    user = get_user_by_email(body.email)
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Correo o contrasena incorrectos.")
+    return TokenResponse(
+        access_token=create_token(user["id"]),
+        user_id=user["id"],
+        display_name=user["display_name"],
+    )
+
+
+@app.post("/auth/verify")
+async def verify_password_endpoint(body: VerifyRequest, user_id: int = Depends(get_current_user)):
+    pw_hash = get_user_password_hash(user_id)
+    if not pw_hash or not verify_password(body.password, pw_hash):
+        raise HTTPException(status_code=401, detail="Contraseña incorrecta.")
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+async def me(user_id: int = Depends(get_current_user)):
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    return {"id": user["id"], "email": user["email"], "display_name": user["display_name"]}
+
+
+# ---------------------------------------------------------------------------
+# People (protected)
+# ---------------------------------------------------------------------------
+
+@app.get("/people")
+async def list_people(user_id: int = Depends(get_current_user)):
+    return get_all_people(user_id)
+
+
+@app.put("/people/{person_id}", response_model=UpdatePersonResponse)
+async def update_person(person_id: int, body: UpdatePersonRequest, user_id: int = Depends(get_current_user)):
+    existing = get_person_by_id(person_id, user_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Persona no encontrada.")
+
+    name         = body.name.strip()
+    relationship = body.relationship.strip()
+    age          = body.age
+    extra        = body.extra.strip() if body.extra else None
+    phone        = body.phone.strip() if body.phone else None
+
+    if body.image:
+        try:
+            image = decode_base64_image(body.image)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        encodings = face_model.get_encodings(image)
+        if len(encodings) == 0:
+            raise HTTPException(status_code=400, detail="No se detecto ningun rostro en la imagen.")
+        if len(encodings) > 1:
+            raise HTTPException(status_code=400, detail="Se detectaron multiples rostros.")
+
+        augmented = augment_embedding(encodings[0], num_variations=3)
+        thumbnail = create_thumbnail(image)
+
+        delete_person(person_id, user_id)
+        new_id = save_person(
+            user_id=user_id,
+            name=name, relationship=relationship,
+            embeddings=augmented, age=age, extra=extra, phone=phone, photo=thumbnail,
+            is_emergency=body.is_emergency,
+        )
+        invalidate_cache(user_id)
+        logger.info(f"Actualizado con nueva foto: {name} (user {user_id})")
+        return UpdatePersonResponse(
+            message=f"{name} actualizado exitosamente.", person_id=new_id,
+            name=name, relationship=relationship, age=age, extra=extra, phone=phone,
+            photo=thumbnail, is_emergency=body.is_emergency,
+        )
+
+    update_person_metadata(person_id, user_id, name, relationship, age, extra, phone, is_emergency=body.is_emergency)
+    invalidate_cache(user_id)
+    logger.info(f"Actualizado: {name} (user {user_id})")
+    return UpdatePersonResponse(
+        message=f"{name} actualizado exitosamente.", person_id=person_id,
+        name=name, relationship=relationship, age=age, extra=extra, phone=phone,
+        photo=existing["photo"], is_emergency=body.is_emergency,
+    )
 
 
 @app.delete("/people/{person_id}", response_model=DeleteResponse)
-async def delete_person(person_id: int):
-    """Elimina una persona por su `id`."""
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM people WHERE id = ?", (person_id,))
-        deleted = cur.rowcount
-        conn.commit()
-        if deleted == 0:
-            raise HTTPException(status_code=404, detail="Persona no encontrada")
-        return DeleteResponse(message="Persona eliminada", deleted=deleted)
-    finally:
-        conn.close()
+async def remove_person(person_id: int, user_id: int = Depends(get_current_user)):
+    deleted = delete_person(person_id, user_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Persona no encontrada.")
+    invalidate_cache(user_id)
+    return DeleteResponse(message="Persona eliminada", deleted=deleted)
 
 
 @app.delete("/people", response_model=DeleteResponse)
-async def delete_all_people(confirm: bool = False):
-    """Elimina todos los registros. Requiere `?confirm=true` para evitar borrados accidentales."""
+async def remove_all(confirm: bool = False, user_id: int = Depends(get_current_user)):
     if not confirm:
-        raise HTTPException(status_code=400, detail="Para borrar todo, añade `?confirm=true` a la petición")
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM people")
-        deleted = cur.rowcount
-        conn.commit()
-        return DeleteResponse(message="Todos los registros eliminados", deleted=deleted)
-    finally:
-        conn.close()
+        raise HTTPException(status_code=400, detail="Agrega ?confirm=true para confirmar.")
+    deleted = delete_all_people(user_id)
+    invalidate_cache(user_id)
+    return DeleteResponse(message="Todos los registros eliminados", deleted=deleted)
 
 
 @app.post("/register", response_model=RegisterResponse)
-async def register_person(request: RegisterRequest):
-    """
-    Registra una nueva persona.
-    Acepta una imagen base64, detecta el rostro, genera un embedding de 128-d,
-    aplica Data Augmentation (3 variaciones) y guarda todo en PostgreSQL.
-    """
+async def register_person(body: RegisterRequest, user_id: int = Depends(get_current_user)):
     try:
-        image = decode_base64_image(request.image)
+        image = decode_base64_image(body.image)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     encodings = face_model.get_encodings(image)
-
     if len(encodings) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="No se detectó ningún rostro en la imagen. Intente con otra foto.",
-        )
-
+        raise HTTPException(status_code=400, detail="No se detecto ningun rostro en la imagen.")
     if len(encodings) > 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Se detectaron múltiples rostros. Solo debe aparecer una persona.",
-        )
+        raise HTTPException(status_code=400, detail="Se detectaron multiples rostros. Solo debe aparecer una persona.")
 
-    # Generar 3 variaciones del embedding (Data Augmentation)
-    primary_encoding = encodings[0]
-    augmented_embeddings = augment_embedding(primary_encoding, num_variations=3)
+    augmented = augment_embedding(encodings[0], num_variations=3)
+    thumbnail = create_thumbnail(image)
 
     try:
-        person_id = save_person(request.name, request.relationship, augmented_embeddings, age=request.age, extra=request.extra)
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Error al guardar en la base de datos.",
+        person_id = save_person(
+            user_id=user_id,
+            name=body.name,
+            relationship=body.relationship,
+            embeddings=augmented,
+            age=body.age,
+            extra=body.extra,
+            phone=body.phone,
+            photo=thumbnail,
+            is_emergency=body.is_emergency,
         )
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error al guardar en la base de datos.")
 
-    logger.info(f"Persona registrada: {request.name} ({request.relationship})")
+    invalidate_cache(user_id)
+    logger.info(f"Registrado: {body.name} (user {user_id})")
 
     return RegisterResponse(
-        message=f"{request.name} ha sido registrado exitosamente.",
+        message=f"{body.name} registrado exitosamente.",
         person_id=person_id,
-        name=request.name,
-        relationship=request.relationship,
-        age=request.age,
-        extra=request.extra,
+        name=body.name,
+        relationship=body.relationship,
+        age=body.age,
+        extra=body.extra,
+        phone=body.phone,
+        photo=thumbnail,
+        is_emergency=body.is_emergency,
     )
 
 
 @app.post("/identify", response_model=IdentifyResponse)
-async def identify_person(request: IdentifyRequest):
-    """
-    Identifica un rostro en un frame de video.
-    Compara el embedding del rostro contra la base de datos
-    usando Distancia Euclidiana con un umbral de 0.6.
-    """
+async def identify_person(body: IdentifyRequest, user_id: int = Depends(get_current_user)):
     try:
-        image = decode_base64_image(request.image)
+        image = decode_base64_image(body.image)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     encodings = face_model.get_encodings(image)
-
     if len(encodings) == 0:
-        return IdentifyResponse(
-            name="desconocido",
-            relationship="",
-            confidence=1.0,
-        )
+        return IdentifyResponse(name="desconocido", relationship="", confidence=1.0)
 
-    # Usar el primer rostro detectado
-    query_encoding = encodings[0]
+    query = encodings[0]
+    db    = get_embeddings_cached(user_id)
 
-    # Obtener todos los embeddings de la BD
-    try:
-        db_people = fetch_all_embeddings()
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Error al consultar la base de datos.",
-        )
+    if not db:
+        return IdentifyResponse(name="desconocido", relationship="", confidence=1.0)
 
-    if not db_people:
-        return IdentifyResponse(
-            name="desconocido",
-            relationship="",
-            confidence=1.0,
-        )
-
-    # Buscar la mejor coincidencia (menor distancia euclidiana)
-    best_match = None
+    best_match    = None
     best_distance = float("inf")
+    for person in db:
+        d = float(np.linalg.norm(query - person["embedding"]))
+        if d < best_distance:
+            best_distance = d
+            best_match    = person
 
-    for person in db_people:
-        distance = np.linalg.norm(query_encoding - person["embedding"])
-        if distance < best_distance:
-            best_distance = distance
-            best_match = person
-
-    # Verificar contra el umbral
-    if best_distance <= IDENTIFICATION_THRESHOLD and best_match is not None:
-        logger.info(
-            f"Identificado: {best_match['name']} "
-            f"(distancia: {best_distance:.4f})"
-        )
+    if best_distance <= IDENTIFICATION_THRESHOLD and best_match:
+        photo = get_person_photo(best_match["group_id"])
+        logger.info(f"Identificado: {best_match['name']} (d={best_distance:.4f}, user={user_id})")
         return IdentifyResponse(
             name=best_match["name"],
             relationship=best_match["relationship"],
             confidence=round(best_distance, 4),
             age=best_match.get("age"),
             extra=best_match.get("extra"),
+            photo=photo,
         )
 
-    return IdentifyResponse(
-        name="desconocido",
-        relationship="",
-        confidence=round(best_distance, 4),
-        age=None,
-        extra=None,
-    )
+    return IdentifyResponse(name="desconocido", relationship="", confidence=round(best_distance, 4))
+
 
 if __name__ == "__main__":
     import uvicorn
-    # El 0.0.0.0 es la clave mágica para que tu celular pueda entrar
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    
