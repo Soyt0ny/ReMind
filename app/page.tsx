@@ -18,18 +18,11 @@ type AuthState = "loading" | "authenticated" | "unauthenticated"
 
 export default function Page() {
   const [authState, setAuthState]   = useState<AuthState>("loading")
+  const [user_id, setUserId]         = useState<number | null>(null)
   const [displayName, setDisplayName] = useState("")
   const [view, setView]             = useState<View>("home")
-  const [recentIdentifications, setRecentIdentifications] = useState<RecentIdent[]>(() => {
-    if (typeof window === "undefined") return []
-    try {
-      const stored = localStorage.getItem("remind_history")
-      if (!stored) return []
-      const parsed: RecentIdent[] = JSON.parse(stored)
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
-      return parsed.filter(r => r.timestamp > cutoff)
-    } catch { return [] }
-  })
+  const [recentIdentifications, setRecentIdentifications] = useState<RecentIdent[]>([])
+  
   const [editingPerson, setEditingPerson] = useState<Person | null>(null)
   const lastIdentifiedRef = useRef<string | null>(null)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
@@ -40,17 +33,36 @@ export default function Page() {
 
   useEffect(() => {
     const token = getToken()
-    if (token) {
+    const storedUserId = localStorage.getItem("remind_user_id")
+    if (token && storedUserId) {
+      const uid = parseInt(storedUserId)
+      setUserId(uid)
       setDisplayName(getDisplayName() ?? "")
       setAuthState("authenticated")
+      
+      // Cargar historial específico del usuario
+      try {
+        const historyKey = `remind_history_${uid}`
+        const stored = localStorage.getItem(historyKey)
+        if (stored) {
+          const parsed: RecentIdent[] = JSON.parse(stored)
+          const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+          setRecentIdentifications(parsed.filter(r => r.timestamp > cutoff))
+        } else {
+          setRecentIdentifications([])
+        }
+      } catch { setRecentIdentifications([]) }
+
     } else {
       setAuthState("unauthenticated")
     }
   }, [])
 
   useEffect(() => {
-    localStorage.setItem("remind_history", JSON.stringify(recentIdentifications))
-  }, [recentIdentifications])
+    if (user_id) {
+      localStorage.setItem(`remind_history_${user_id}`, JSON.stringify(recentIdentifications))
+    }
+  }, [recentIdentifications, user_id])
 
   function handleLogout() {
     clearSession()
@@ -123,18 +135,15 @@ export default function Page() {
   }
 
   const activeTab = (
-    view === "contacts" ? "contacts" : view === "settings" ? "settings" : "home"
-  ) as "home" | "contacts" | "settings"
+    view === "contacts" ? "contacts" : "home"
+  ) as "home" | "contacts"
 
   return (
     <div className="relative flex min-h-[100dvh] max-w-md mx-auto flex-col bg-[#f6f7f8] overflow-x-hidden">
-      {view !== "contacts" && (
-        <Header
-          title={view === "settings" ? "Ajustes" : "ReMind"}
-          onBack={view === "settings" ? () => setView("home") : undefined}
-          onSettings={view === "home" ? () => setView("settings") : undefined}
-        />
-      )}
+      <Header
+        title={view === "home" ? "ReMind" : view === "contacts" ? "Contactos" : "ReMind"}
+        onSettings={handleLogout}
+      />
 
       <div className="flex-1 flex flex-col overflow-y-auto">
         {view === "home" && (

@@ -1,13 +1,11 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState } from 'react';
 import {
   StyleSheet, Text, View, TextInput, TouchableOpacity,
   Alert, ScrollView, KeyboardAvoidingView, Platform, Image, Modal, FlatList,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from './services/api';
+import { api, type Person } from './services/api';
 import { DESIGN_SYSTEM } from '../constants/DesignSystem';
 
 const RELATIONSHIPS = [
@@ -16,17 +14,21 @@ const RELATIONSHIPS = [
   "Vecino / Vecina", "Otro",
 ];
 
-export default function RegisterForm() {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [name, setName]               = useState('');
-  const [relationship, setRelationship] = useState('');
-  const [age, setAge]                 = useState('');
-  const [phone, setPhone]             = useState('');
-  const [extra, setExtra]             = useState('');
-  const [isEmergency, setIsEmergency] = useState(false);
+interface EditPersonFormProps {
+  person: Person;
+  onSaved: () => void;
+  onCancel: () => void;
+}
+
+export default function EditPersonForm({ person, onSaved, onCancel }: EditPersonFormProps) {
+  const [name, setName]               = useState(person.name);
+  const [relationship, setRelationship] = useState(person.relationship);
+  const [age, setAge]                 = useState(person.age?.toString() ?? '');
+  const [phone, setPhone]             = useState(person.phone ?? '');
+  const [extra, setExtra]             = useState(person.extra ?? '');
+  const [isEmergency, setIsEmergency] = useState(person.is_emergency ?? false);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading]         = useState(false);
-  
   const [showRelPicker, setShowRelRelPicker] = useState(false);
 
   const takePhoto = async () => {
@@ -60,26 +62,25 @@ export default function RegisterForm() {
   };
 
   async function guardar() {
-    if (!name.trim() || !relationship.trim() || !imageBase64) {
-      Alert.alert('Faltan datos', 'Completa el nombre, relación y una foto.');
+    if (!name.trim() || !relationship.trim()) {
+      Alert.alert('Faltan datos', 'Completa el nombre y la relación.');
       return;
     }
     setLoading(true);
     try {
-      await api.register({
+      await api.updatePerson(person.id, {
         name: name.trim(),
         relationship: relationship.trim(),
-        image: imageBase64,
+        image: imageBase64 || undefined,
         age: age ? Number(age) : undefined,
         phone: phone.trim() || undefined,
         extra: extra.trim() || undefined,
         is_emergency: isEmergency,
       });
-      Alert.alert('Éxito', `${name} registrado correctamente.`, [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      Alert.alert('Éxito', `${name} actualizado correctamente.`);
+      onSaved();
     } catch (err) {
-      Alert.alert('Error', 'No se pudo guardar el registro.');
+      Alert.alert('Error', 'No se pudo guardar los cambios.');
     } finally {
       setLoading(false);
     }
@@ -91,7 +92,13 @@ export default function RegisterForm() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        <Text style={styles.mainTitle}>¿Quién es esta persona?</Text>
+        <View style={styles.header}>
+            <TouchableOpacity onPress={onCancel}>
+                <Ionicons name="chevron-back" size={24} color="#111418" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Editar persona</Text>
+            <View style={{ width: 24 }} />
+        </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Nombre</Text>
@@ -153,7 +160,7 @@ export default function RegisterForm() {
           style={[styles.emergencyBox, isEmergency && styles.emergencyBoxActive]}
         >
           <View style={styles.emergencyLeft}>
-            <Ionicons name="medical" size={24} color={isEmergency ? "#EF4444" : "#9CA3AF"} />
+            <Ionicons name="alert-circle-outline" size={24} color={isEmergency ? "#EF4444" : "#9CA3AF"} />
             <View style={{ marginLeft: 12 }}>
               <Text style={[styles.emergencyLabel, isEmergency && { color: "#B91C1C" }]}>Contacto de emergencia</Text>
               <Text style={styles.emergencySub}>Aparecerá en el botón de ayuda rápida</Text>
@@ -164,41 +171,35 @@ export default function RegisterForm() {
           </View>
         </TouchableOpacity>
 
-        <Text style={[styles.mainTitle, { marginTop: 32 }]}>Agregar foto</Text>
-        <Text style={styles.photoHint}>Agregá una foto clara del rostro para un mejor reconocimiento.</Text>
+        <Text style={[styles.mainTitle, { marginTop: 32 }]}>Foto</Text>
+        <Text style={styles.photoHint}>Tomá una nueva foto o mantené la actual.</Text>
 
-        {!imageBase64 ? (
-          <View style={styles.photoActions}>
-            <TouchableOpacity style={styles.photoCard} onPress={takePhoto}>
-              <View style={styles.photoIconCircle}>
-                <Ionicons name="camera-outline" size={32} color="#137fec" />
-              </View>
-              <Text style={styles.photoCardText}>Tomar Foto</Text>
-            </TouchableOpacity>
+        <View style={styles.previewContainer}>
+          <Image source={{ uri: imageBase64 || person.photo }} style={styles.previewImage} />
+          {imageBase64 && (
+             <View style={styles.newBadge}>
+                <Text style={styles.newBadgeText}>Nueva foto</Text>
+             </View>
+          )}
+        </View>
 
-            <TouchableOpacity style={[styles.photoCard, styles.photoCardGray]} onPress={pickImage}>
-              <View style={[styles.photoIconCircle, { backgroundColor: '#F3F4F6' }]}>
-                <Ionicons name="image-outline" size={32} color="#9CA3AF" />
-              </View>
-              <Text style={[styles.photoCardText, { color: '#9CA3AF' }]}>Subir Foto</Text>
+        <View style={styles.photoActions}>
+            <TouchableOpacity style={styles.retryBtn} onPress={takePhoto}>
+              <Ionicons name="camera-outline" size={20} color="#6B7280" />
+              <Text style={styles.retryText}>Cámara</Text>
             </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.previewContainer}>
-            <Image source={{ uri: imageBase64 }} style={styles.previewImage} />
-            <TouchableOpacity style={styles.retryBtn} onPress={() => setImageBase64(null)}>
-              <Ionicons name="refresh" size={20} color="#6B7280" />
-              <Text style={styles.retryText}>Tomar otra foto</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={pickImage}>
+              <Ionicons name="image-outline" size={20} color="#6B7280" />
+              <Text style={styles.retryText}>Subir foto</Text>
             </TouchableOpacity>
-          </View>
-        )}
+        </View>
 
         <TouchableOpacity 
-          style={[styles.saveBtn, (!imageBase64 || !name || !relationship || loading) && styles.saveBtnDisabled]}
+          style={[styles.saveBtn, (loading || !name || !relationship) && styles.saveBtnDisabled]}
           onPress={guardar}
-          disabled={loading || !imageBase64}
+          disabled={loading}
         >
-          <Text style={styles.saveBtnText}>{loading ? 'Guardando...' : 'Guardar'}</Text>
+          <Text style={styles.saveBtnText}>{loading ? 'Guardando...' : 'Guardar cambios'}</Text>
         </TouchableOpacity>
 
         <View style={{ height: 60 }} />
@@ -237,7 +238,9 @@ export default function RegisterForm() {
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: 'white' },
   content: { padding: 24 },
-  mainTitle: { fontSize: 24, fontWeight: '900', color: '#111418', marginBottom: 20 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: '#111418' },
+  mainTitle: { fontSize: 24, fontWeight: '900', color: '#111418', marginBottom: 12 },
   field: { marginBottom: 20 },
   label: { fontSize: 16, fontWeight: '600', color: '#111418', marginBottom: 8 },
   inputWrapper: {
@@ -271,25 +274,12 @@ const styles = StyleSheet.create({
   switchCircle: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'white' },
   switchCircleActive: { alignSelf: 'flex-end' },
   photoHint: { fontSize: 14, color: '#6B7280', marginBottom: 20 },
-  photoActions: { flexDirection: 'row', gap: 16 },
-  photoCard: { 
-    flex: 1, 
-    height: 160, 
-    borderRadius: 16, 
-    borderWidth: 2, 
-    borderStyle: 'dashed', 
-    borderColor: '#137fec66', 
-    backgroundColor: '#F0F7FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12
-  },
-  photoCardGray: { borderColor: '#E5E7EB', backgroundColor: 'white' },
-  photoIconCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'white', alignItems: 'center', justifyContent: 'center' },
-  photoCardText: { fontSize: 16, fontWeight: '700', color: '#137fec' },
-  previewContainer: { marginBottom: 16 },
-  previewImage: { width: '100%', height: 240, borderRadius: 16, marginBottom: 12 },
-  retryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12 },
+  previewContainer: { marginBottom: 16, height: 240, borderRadius: 16, overflow: 'hidden', borderWidth: 2, borderColor: '#E5E7EB' },
+  previewImage: { width: '100%', height: '100%' },
+  newBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: '#10B981', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99 },
+  newBadgeText: { color: 'white', fontSize: 10, fontWeight: '900' },
+  photoActions: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  retryBtn: { flex: 1, height: 48, borderRadius: 12, borderWidth: 2, borderColor: '#E5E7EB', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   retryText: { color: '#6B7280', fontWeight: '600' },
   saveBtn: { 
     height: 64, backgroundColor: '#137fec', borderRadius: 12, 

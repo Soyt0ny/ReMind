@@ -351,3 +351,19 @@ def delete_all_people(user_id: int) -> int:
         return deleted
     finally:
         conn.close()
+
+
+def reset_all_data() -> dict:
+    global _cache
+    _cache = {}
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM people")
+        people_deleted = cur.rowcount
+        cur.execute("DELETE FROM users")
+        users_deleted = cur.rowcount
+        conn.commit()
+        return {"people": people_deleted, "users": users_deleted}
+    finally:
+        conn.close()

@@ -11,7 +11,6 @@ export function Navigation({ active, onChange }: NavigationProps) {
   const tabs: { id: Tab; icon: string; label: string }[] = [
     { id: "home",     icon: "home",     label: "Inicio"    },
     { id: "contacts", icon: "contacts", label: "Contactos" },
-    { id: "settings", icon: "settings", label: "Ajustes"   },
   ]
 
   return (

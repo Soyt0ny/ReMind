@@ -30,13 +30,22 @@ export default function RootLayout() {
     if (!loaded) return;
 
     async function initAuth() {
-      const token = await AsyncStorage.getItem('auth_token');
-      if (token) {
-        setApiToken(token);
+      try {
+        console.log("[Auth] Iniciando carga de token...");
+        const token = await AsyncStorage.getItem('auth_token');
+        if (token) {
+          console.log("[Auth] Token encontrado.");
+          setApiToken(token);
+        } else {
+          console.log("[Auth] No hay token almacenado.");
+        }
+      } catch (e) {
+        console.error("[Auth] Error en initAuth:", e);
+      } finally {
+        setAuthReady(true);
+        console.log("[Auth] Listo, ocultando Splash Screen.");
+        SplashScreen.hideAsync();
       }
-      // Si no hay token, la pantalla Home redirige a /login al montarse.
-      setAuthReady(true);
-      SplashScreen.hideAsync();
     }
 
     // Cuando el token expira o es invalido, volver al login.

@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import numpy as np
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from auth     import create_token, get_current_user, hash_password, verify_password
@@ -25,6 +25,7 @@ from database import (
     create_user,
     init_db,
     invalidate_cache,
+    reset_all_data,
     save_person,
     update_person_metadata,
 )
@@ -294,6 +295,22 @@ async def identify_person(body: IdentifyRequest, user_id: int = Depends(get_curr
         )
 
     return IdentifyResponse(name="desconocido", relationship="", confidence=round(best_distance, 4))
+
+
+# ---------------------------------------------------------------------------
+# Admin
+# ---------------------------------------------------------------------------
+
+@app.delete("/admin/reset")
+async def admin_reset(confirm: bool = False, x_admin_secret: str = Header(None)):
+    secret = __import__("os").getenv("SECRET_KEY", "")
+    if not secret or x_admin_secret != secret:
+        raise HTTPException(status_code=403, detail="Forbidden.")
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Agrega ?confirm=true para confirmar.")
+    counts = reset_all_data()
+    logger.info(f"Admin reset: {counts}")
+    return {"message": "Base de datos reseteada.", **counts}
 
 
 if __name__ == "__main__":

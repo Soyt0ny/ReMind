@@ -1,255 +1,41 @@
-# ReMind — Asistente Visual de Memoria
+# ReMind - Asistente Visual de Memoria 🧠
 
-Aplicación de asistencia visual para personas con Alzheimer. Identifica rostros y recuerda nombres y parentescos usando reconocimiento facial.
+**ReMind** es una solución integral diseñada para mejorar la calidad de vida de personas que conviven con Alzheimer u otros trastornos de la memoria. Utilizando inteligencia artificial y reconocimiento facial en tiempo real, la aplicación ayuda a los usuarios a identificar a sus seres queridos, cuidadores y personal médico, reduciendo la ansiedad y fomentando la autonomía.
 
-## Requisitos previos
+## 🚀 Funcionalidades Principales
 
-| Herramienta | Versión mínima                                |
-| ----------- | --------------------------------------------- |
-| **Node.js** | 18+                                           |
-| **npm**     | 9+                                            |
-| **Python**  | 3.10+                                         |
-| **cmake**   | 3.x (solo para compilar `dlib`)               |
-| **g++**     | Cualquiera (solo Linux, para compilar `dlib`) |
+### 🔍 Reconocimiento Facial en Tiempo Real
+- **Identificación Instantánea**: Mediante la cámara del dispositivo, la app detecta rostros y muestra el nombre, relación (ej. "Hija", "Médico") y datos útiles guardados.
+- **Modo Silencioso**: La cámara captura fotos de forma transparente sin sonidos ni destellos para no incomodar al usuario.
+- **Historial Reciente**: Acceso rápido a las últimas personas identificadas directamente desde la pantalla de inicio.
 
-> No se requiere PostgreSQL. El backend usa **SQLite** de forma local (archivo `backend/remind.db`).
+### 👥 Gestión de Contactos
+- **Registro Personalizado**: Permite añadir familiares con nombre, relación, edad, teléfono y notas adicionales.
+- **Subida Flexible**: Posibilidad de registrar personas tomando una foto en el momento o subiendo una imagen desde la galería.
+- **Seguridad**: Las acciones sensibles (editar o eliminar contactos) están protegidas por contraseña para evitar borrados accidentales.
 
-### Instalar requisitos en Linux (Ubuntu / Debian)
+### 🚨 Asistencia de Emergencia
+- **Ayuda Rápida**: Un botón prominente en la pantalla de inicio permite realizar una llamada telefónica directa al contacto de emergencia configurado con un solo toque.
 
-```bash
-# Actualizar paquetes
-sudo apt-get update
+## 🛠️ Stack Tecnológico
 
-# Node.js 20 (via NodeSource)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
+### Backend (Cerebro)
+- **FastAPI (Python)**: API de alto rendimiento y baja latencia.
+- **Dlib & Face Recognition**: Motores de IA para la generación de "embeddings" faciales y comparación de rostros.
+- **SQLite**: Base de datos ligera y persistente.
+- **Docker**: Contenerización completa para despliegue consistente.
 
-# Python 3, pip, venv y dependencias de compilación para dlib
-sudo apt-get install -y python3 python3-pip python3-venv python3-dev \
-  cmake g++ build-essential
+### Mobile (Cliente Principal)
+- **React Native & Expo**: Aplicación multiplataforma (iOS/Android).
+- **Expo Camera & Image Picker**: Integración nativa con el hardware del celular.
+- **React Native Safe Area Context**: Diseño adaptado a dispositivos con notch y barras de sistema modernas.
 
-# Verificar versiones
-node --version    # v20.x.x
-npm --version     # 10.x.x
-python3 --version # 3.10+
-```
+### Web (Panel de Control)
+- **Next.js 14 (App Router)**: Interfaz administrativa moderna y responsiva.
+- **Tailwind CSS**: Diseño limpio y profesional basado en un sistema de diseño unificado.
 
-### Instalar requisitos en Linux (Fedora / RHEL)
-
-```bash
-# Node.js
-sudo dnf install -y nodejs npm
-
-# Python y herramientas de compilación
-sudo dnf install -y python3 python3-pip python3-devel cmake gcc-c++
-```
-
-### Instalar requisitos en macOS
-
-```bash
-# Con Homebrew
-brew install node python cmake
-```
-
-### Instalar requisitos en Windows
-
-1. Descarga e instala [Node.js](https://nodejs.org/) (incluye npm).
-2. Descarga e instala [Python](https://www.python.org/downloads/) (marca "Add to PATH").
-3. `cmake` se instala vía pip o descarga desde [cmake.org](https://cmake.org/download/) (marcar "Add to PATH").
+## 🏗️ Arquitectura del Sistema
+La aplicación sigue un modelo cliente-servidor donde tanto la web como la app mobile consumen una API centralizada desplegada en la nube (**Dokploy**). El historial se maneja localmente por usuario para garantizar la privacidad y rapidez de la interfaz.
 
 ---
-
-## Instalación rápida
-
-### 1. Clonar el repositorio
-
-```bash
-git clone <url-del-repo>
-cd re-mind-visual-assistance-app
-```
-
-### 2. Instalar dependencias del frontend
-
-```bash
-npm install
-```
-
-### 3. Crear entorno virtual de Python e instalar dependencias del backend
-
-**Windows (PowerShell):**
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-```
-
-> **Nota sobre `dlib` en Windows:** si la instalación de `dlib` falla, instala primero `cmake` y `dlib-bin`:
->
-> ```powershell
-> pip install cmake setuptools wheel
-> pip install dlib-bin
-> pip install face_recognition --no-deps
-> pip install Pillow face-recognition-models Click
-> ```
-
-**Linux / macOS:**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements.txt
-```
-
-> **Nota sobre `dlib` en Linux:** necesitas `cmake` y un compilador C++:
->
-> ```bash
-> # Ubuntu / Debian
-> sudo apt-get update
-> sudo apt-get install -y cmake g++ python3-dev
->
-> # Fedora / RHEL
-> sudo dnf install cmake gcc-c++ python3-devel
->
-> # macOS (con Homebrew)
-> brew install cmake
->
-> # Luego instala normalmente
-> pip install dlib face_recognition
-> ```
-
----
-
-## Ejecución
-
-### Opción 1 — Comando único
-
-**Windows (PowerShell):** abre dos ventanas automáticamente:
-
-```powershell
-npm run dev:all
-```
-
-**Linux / macOS:** ejecuta ambos procesos en paralelo:
-
-```bash
-npm run dev:linux
-```
-
-### Opción 2 — Manual (dos terminales)
-
-**Terminal 1 — Frontend:**
-
-```bash
-npm run dev
-```
-
-**Terminal 2 — Backend:**
-
-Windows:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-cd backend
-python -m uvicorn main:app --reload --port 8000
-```
-
-Linux / macOS:
-
-```bash
-source .venv/bin/activate
-cd backend
-python3 -m uvicorn main:app --reload --port 8000
-```
-
----
-
-## URLs
-
-| Servicio           | URL                        |
-| ------------------ | -------------------------- |
-| Frontend (Next.js) | http://localhost:3000      |
-| Backend (FastAPI)  | http://localhost:8000      |
-| Docs API (Swagger) | http://localhost:8000/docs |
-
----
-
-## Endpoints de la API
-
-| Método   | Ruta                   | Descripción                                            |
-| -------- | ---------------------- | ------------------------------------------------------ |
-| `GET`    | `/`                    | Health check                                           |
-| `GET`    | `/people`              | Lista personas registradas                             |
-| `POST`   | `/register`            | Registra una persona (nombre, parentesco, foto base64) |
-| `POST`   | `/identify`            | Identifica un rostro en un frame base64                |
-| `DELETE` | `/people/{id}`         | Elimina una persona por ID                             |
-| `DELETE` | `/people?confirm=true` | Elimina todos los registros                            |
-
----
-
-## Estructura del proyecto
-
-```
-re-mind-visual-assistance-app/
-├── app/                    # Next.js - páginas y estilos globales
-│   ├── page.tsx
-│   ├── layout.tsx
-│   └── globals.css
-├── components/
-│   └── remind/             # Componentes principales de la app
-│       ├── header.tsx
-│       ├── navigation.tsx
-│       ├── camera-capture.tsx
-│       ├── identification-card.tsx
-│       └── register-form.tsx
-├── backend/
-│   ├── main.py             # FastAPI + SQLite + face_recognition
-│   ├── remind.db           # Base de datos SQLite (se crea automáticamente)
-│   ├── requirements.txt
-│   └── schema.sql          # Esquema de referencia
-├── scripts/
-│   ├── run-all.ps1         # Script para iniciar frontend y backend (Windows)
-│   └── run-all.sh          # Script para iniciar frontend y backend (Linux/macOS)
-├── package.json
-└── README.md
-```
-
----
-
-## Verificar que funciona
-
-1. Abre http://localhost:3000 en tu navegador.
-2. Ve a **Registrar** → ingresa nombre, parentesco y toma una foto.
-3. Cambia a **Identificar** → enciende la cámara y apúntala a un rostro registrado.
-
----
-
-## Troubleshooting
-
-- **El backend no inicia:** verifica que el entorno virtual esté activado y que `face_recognition` se importa correctamente:
-
-  ```bash
-  # Windows
-  python -c "import face_recognition; print('OK')"
-
-  # Linux / macOS
-  python3 -c "import face_recognition; print('OK')"
-  ```
-
-- **Puerto 3000 ocupado:** cierra otros procesos de Next.js:
-  ```bash
-  npx kill-port 3000
-  # o en Linux:
-  lsof -ti:3000 | xargs kill -9
-  ```
-- **Puerto 8000 ocupado:**
-  ```bash
-  npx kill-port 8000
-  # o en Linux:
-  lsof -ti:8000 | xargs kill -9
-  ```
-- **La cámara no funciona:** asegúrate de acceder desde `localhost` (no IP) para que el navegador permita el acceso a la cámara.
-- **`Permission denied` en Linux al ejecutar el script:**
-  ```bash
-  chmod +x scripts/run-all.sh
-  ```
+*Desarrollado como proyecto de asistencia tecnológica para la salud.*

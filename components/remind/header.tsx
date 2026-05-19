@@ -29,9 +29,9 @@ export function Header({ title = "ReMind", onBack, onSettings }: HeaderProps) {
           <button
             onClick={onSettings}
             className="p-1 rounded-full hover:bg-gray-100 transition-colors"
-            aria-label="Ajustes"
+            aria-label="Cerrar sesión"
           >
-            <span className="material-symbols-outlined text-[28px] text-[#111418]">settings</span>
+            <span className="material-symbols-outlined text-[28px] text-[#111418]">logout</span>
           </button>
         )}
       </div>

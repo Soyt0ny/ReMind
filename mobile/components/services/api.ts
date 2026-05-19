@@ -1,7 +1,5 @@
-// Cambia esta IP por la de tu computadora en la misma red WiFi.
-// Para encontrarla: `ip addr` (Linux/Mac) o `ipconfig` (Windows).
-// También podés crear un archivo mobile/.env con EXPO_PUBLIC_API_URL=http://tu-ip:8000
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://192.168.1.22:8000';
+// URL base de la API de producción.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://remind.soyt0ny.site';
 
 // Token JWT activo — se carga desde AsyncStorage al iniciar la app.
 let _token: string | null = null;
@@ -116,4 +114,13 @@ export const api = {
 
   deletePerson: (id: number) =>
     request(`/people/${id}`, { method: 'DELETE' }),
+
+  updatePerson: (id: number, data: Partial<RegisterData> & { is_emergency?: boolean }) =>
+    request(`/people/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  verifyPassword: (password: string) =>
+    request<{ ok: boolean }>('/auth/verify', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
 };

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { saveSession } from "@/lib/auth"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://remind.soyt0ny.site"
 
 interface LoginFormProps {
   onAuth: (displayName: string) => void
@@ -56,7 +56,7 @@ export function LoginForm({ onAuth }: LoginFormProps) {
       }
 
       const data = await res.json()
-      saveSession(data.access_token, data.display_name)
+      saveSession(data.access_token, data.display_name, data.user_id)
       onAuth(data.display_name)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error inesperado.")

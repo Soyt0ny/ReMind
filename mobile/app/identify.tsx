@@ -18,6 +18,7 @@ export default function IdentifyScreen() {
   const [result, setResult]             = useState<IdentifyResult | null>(null);
   const [isUnknown, setIsUnknown]       = useState(false);
   const [scanning, setScanning]         = useState(false);
+  const [facing, setFacing]             = useState<'back' | 'front'>('back');
 
   const cameraRef       = useRef<CameraView>(null);
   const isProcessingRef = useRef(false);
@@ -30,9 +31,12 @@ export default function IdentifyScreen() {
     try {
       const raw      = await AsyncStorage.getItem('recent_identifications');
       const existing: IdentifyResult[] = raw ? JSON.parse(raw) : [];
+      const cutoff   = Date.now() - 7 * 24 * 60 * 60 * 1000;
       const updated  = [
         { ...person, timestamp: Date.now() },
-        ...existing.filter(r => r.name !== person.name).slice(0, 9),
+        ...existing
+          .filter(r => r.name !== person.name && ((r as any).timestamp ?? 0) > cutoff)
+          .slice(0, 49),
       ];
       await AsyncStorage.setItem('recent_identifications', JSON.stringify(updated));
     } catch { /* silent */ }
@@ -49,8 +53,9 @@ export default function IdentifyScreen() {
         const photo = await cameraRef.current.takePictureAsync({
           base64:  true,
           quality: 0.4,
+          shutterSound: false, // ¡SILENCIOSO!
         });
-        if (!photo.base64) return;
+        if (!photo || !photo.base64) return;
 
         const identified = await api.identify(photo.base64);
 
@@ -97,22 +102,35 @@ export default function IdentifyScreen() {
     );
   }
 
+  const toggleCamera = () => {
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
+
   return (
     <View style={styles.container}>
-      <CameraView style={StyleSheet.absoluteFill} facing="back" ref={cameraRef} />
+      <CameraView style={StyleSheet.absoluteFill} facing={facing} ref={cameraRef} />
 
       {/* Barra superior */}
       <SafeAreaView style={styles.topBar}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={20} color="white" />
-          <Text style={styles.backButtonText}>Volver</Text>
-        </TouchableOpacity>
-        {scanning && (
-          <View style={styles.scanningBadge}>
-            <ActivityIndicator size="small" color="white" style={{ marginRight: 6 }} />
-            <Text style={styles.scanningText}>Escaneando...</Text>
+        <View style={styles.topBarContent}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={20} color="white" />
+            <Text style={styles.backButtonText}>Volver</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.topBarRight}>
+            <TouchableOpacity style={styles.flipButton} onPress={toggleCamera}>
+              <Ionicons name="camera-reverse" size={24} color="white" />
+            </TouchableOpacity>
+            
+            {scanning && (
+              <View style={styles.scanningBadge}>
+                <ActivityIndicator size="small" color="white" style={{ marginRight: 6 }} />
+                <Text style={styles.scanningText}>Escaneando...</Text>
+              </View>
+            )}
           </View>
-        )}
+        </View>
       </SafeAreaView>
 
       {/* Overlay: persona identificada */}
@@ -165,11 +183,19 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    backgroundColor: 'rgba(0,0,0,0.2)', // Un toque de sombra para que se vea mejor sobre cualquier fondo
+  },
+  topBarContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: THEME.spacing.md,
-    paddingTop: THEME.spacing.sm,
+    paddingVertical: THEME.spacing.sm,
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   backButton: {
     flexDirection: 'row',
@@ -177,6 +203,11 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.colors.overlay,
     paddingVertical: 8,
     paddingHorizontal: 14,
+    borderRadius: THEME.radius.full,
+  },
+  flipButton: {
+    backgroundColor: THEME.colors.overlay,
+    padding: 10,
     borderRadius: THEME.radius.full,
   },
   backButtonText: {

@@ -1,29 +1,39 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  FlatList, Image, Alert, Linking, SafeAreaView,
+  FlatList, Image, Alert, Linking, Modal, ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { THEME } from '../../constants/Theme';
-import { setApiToken } from '../../components/services/api';
-import type { IdentifyResult } from '../../components/services/api';
+import { api, type Person } from '../../components/services/api';
+import { DESIGN_SYSTEM } from '../../constants/DesignSystem';
 
 interface EmergencyContact {
-  id:    number;
   name:  string;
   phone: string;
 }
 
-interface RecentItem extends IdentifyResult {
+interface RecentItem {
+  name: string;
+  relationship: string;
+  photo?: string;
   timestamp: number;
+}
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Buenos Días";
+  if (h < 18) return "Buenas Tardes";
+  return "Buenas Noches";
 }
 
 export default function HomeScreen() {
   const [recents, setRecents]       = useState<RecentItem[]>([]);
   const [emergency, setEmergency]   = useState<EmergencyContact | null>(null);
   const [userName, setUserName]     = useState('');
+  const [showHistory, setShowHistory] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -33,46 +43,45 @@ export default function HomeScreen() {
 
   async function loadData() {
     try {
-      const token = await AsyncStorage.getItem('auth_token');
-      if (!token) {
-        router.replace('/login');
-        return;
-      }
-      const [recentRaw, emergencyRaw, displayName] = await Promise.all([
+      // 1. Cargar datos locales
+      const [recentRaw, displayName] = await Promise.all([
         AsyncStorage.getItem('recent_identifications'),
-        AsyncStorage.getItem('emergency_contact'),
         AsyncStorage.getItem('user_display_name'),
       ]);
-      if (recentRaw)    setRecents(JSON.parse(recentRaw).slice(0, 5));
-      if (emergencyRaw) setEmergency(JSON.parse(emergencyRaw));
-      if (displayName)  setUserName(displayName);
-    } catch { /* silent */ }
+      
+      if (recentRaw) {
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        setRecents((JSON.parse(recentRaw) as RecentItem[]).filter(r => r.timestamp > cutoff));
+      }
+      if (displayName) setUserName(displayName);
+
+      // 2. Cargar contacto de emergencia desde el Servidor (Fuente de verdad)
+      const people = await api.getPeople();
+      const emergencyPerson = people.find((p: Person) => p.is_emergency && p.phone);
+      
+      if (emergencyPerson) {
+        setEmergency({ name: emergencyPerson.name, phone: emergencyPerson.phone! });
+      } else {
+        setEmergency(null);
+      }
+    } catch (err) {
+      console.error("[Home] Error cargando datos:", err);
+    }
   }
 
   async function cerrarSesion() {
-    Alert.alert('Cerrar sesion', '¿Seguro que queres cerrar sesion?', [
+    Alert.alert('Cerrar sesión', '¿Seguro que querés cerrar sesión?', [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Cerrar sesion',
+        text: 'Cerrar sesión',
         style: 'destructive',
         onPress: async () => {
-          await AsyncStorage.multiRemove(['auth_token', 'user_display_name', 'recent_identifications', 'emergency_contact']);
-          setApiToken(null);
+          await AsyncStorage.multiRemove(['auth_token', 'user_display_name', 'recent_identifications']);
+          setEmergency(null);
           router.replace('/login');
         },
       },
     ]);
-  }
-
-  function llamarEmergencia() {
-    if (!emergency) {
-      Alert.alert(
-        'Sin contacto de emergencia',
-        'Anda a Contactos, abre el detalle de una persona y marcala como emergencia.',
-      );
-      return;
-    }
-    Linking.openURL(`tel:${emergency.phone}`);
   }
 
   function formatTime(timestamp: number) {
@@ -81,80 +90,130 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.container}>
 
         {/* Header */}
         <View style={styles.header}>
-          <View style={{ flex: 1 }} />
           <Text style={styles.headerTitle}>ReMind</Text>
-          <View style={{ flex: 1, alignItems: 'flex-end' }}>
-            <TouchableOpacity style={styles.settingsButton} onPress={cerrarSesion}>
-              <Ionicons name="log-out-outline" size={24} color={THEME.colors.text} />
+          <TouchableOpacity style={styles.settingsBtn} onPress={cerrarSesion}>
+            <Ionicons name="log-out-outline" size={24} color="#111418" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+          {/* Greeting */}
+          <View style={styles.greetingSection}>
+            <Text style={styles.greetingTitle}>{getGreeting()},</Text>
+            <Text style={styles.greetingName}>{userName || 'bienvenido'}</Text>
+            <Text style={styles.greetingSub}>¿Listo para reconocer a alguien?</Text>
+          </View>
+
+          {/* Identify Button */}
+          <TouchableOpacity 
+            activeOpacity={0.9}
+            onPress={() => router.push('/identify')}
+            style={styles.identifyBtn}
+          >
+            <View style={styles.iconCircle}>
+               <Ionicons name="happy-outline" size={64} color="white" />
+            </View>
+            <Text style={styles.identifyText}>Identificar Persona</Text>
+            <Text style={styles.identifySubText}>Toca aquí para escanear una cara</Text>
+          </TouchableOpacity>
+
+          {/* Recents Section */}
+          {recents.length > 0 && (
+            <View style={styles.recentsSection}>
+              <View style={styles.recentsHeader}>
+                <Text style={styles.recentsTitle}>Identificados Recientemente</Text>
+                <TouchableOpacity onPress={() => setShowHistory(true)}>
+                  <Text style={styles.seeAll}>Ver todos</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.recentsGrid}>
+                {recents.slice(0, 2).map((item, i) => (
+                  <View key={i} style={styles.recentCard}>
+                    <View style={styles.recentPhotoBox}>
+                      {item.photo ? (
+                        <Image source={{ uri: item.photo }} style={styles.recentPhoto} />
+                      ) : (
+                        <Ionicons name="person" size={32} color="#9CA3AF" />
+                      )}
+                    </View>
+                    <Text style={styles.recentName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.recentRel}>{item.relationship}</Text>
+                    <Text style={styles.recentTime}>{formatTime(item.timestamp!)}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Emergency Button (Exact Web Style) */}
+          <View style={[styles.emergencyShadowBox, emergency && DESIGN_SYSTEM.shadows.md]}>
+            <TouchableOpacity 
+              activeOpacity={0.8}
+              style={[styles.emergencyBtn, emergency ? styles.emergencyBtnActive : styles.emergencyBtnInactive]} 
+              onPress={() => {
+                if (emergency) {
+                  Linking.openURL(`tel:${emergency.phone}`);
+                } else {
+                  Alert.alert("Aviso", "No tienes un contacto de emergencia configurado. Hazlo editando un contacto.");
+                }
+              }}
+            >
+              <Ionicons name="medical" size={28} color={emergency ? "white" : "#F87171"} />
+              <Text style={emergency ? styles.emergencyBtnText : styles.emergencyBtnTextInactive}>
+                Llamada de Emergencia
+              </Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Saludo */}
-        <View style={styles.greeting}>
-          <Text style={styles.greetingText}>
-            {userName ? `Hola, ${userName}` : 'Hola'}
-          </Text>
-          <Text style={styles.greetingName}>bienvenido a ReMind</Text>
-        </View>
-
-        {/* Boton principal: Identificar */}
-        <TouchableOpacity
-          style={styles.identifyButton}
-          onPress={() => router.push('/identify')}
-          activeOpacity={0.85}
-        >
-          <View style={styles.identifyIconBox}>
-            <Ionicons name="scan" size={72} color="white" />
-          </View>
-          <Text style={styles.identifyTitle}>Identificar Persona</Text>
-          <Text style={styles.identifySubtitle}>Toca aqui para usar la camara</Text>
-        </TouchableOpacity>
-
-        {/* Recientes */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Identificados Recientemente</Text>
-          {recents.length === 0 ? (
-            <Text style={styles.emptyText}>
-              Aun no hay identificaciones. Usa el boton de arriba para empezar.
-            </Text>
-          ) : (
-            <FlatList
-              data={recents}
-              keyExtractor={(_, i) => String(i)}
-              scrollEnabled={false}
-              renderItem={({ item }) => (
-                <View style={styles.recentRow}>
-                  {item.photo ? (
-                    <Image source={{ uri: item.photo }} style={styles.recentPhoto} />
-                  ) : (
-                    <View style={[styles.recentPhoto, styles.recentPhotoPlaceholder]}>
-                      <Ionicons name="person" size={24} color={THEME.colors.textLight} />
-                    </View>
-                  )}
-                  <View style={styles.recentInfo}>
-                    <Text style={styles.recentName}>{item.name}</Text>
-                    <Text style={styles.recentRelationship}>{item.relationship}</Text>
-                  </View>
-                  <Text style={styles.recentTime}>{formatTime(item.timestamp!)}</Text>
-                </View>
-              )}
-            />
+          {!emergency && (
+            <Text style={styles.emergencyHint}>Configurá un contacto de emergencia en Contactos</Text>
           )}
-        </View>
+        </ScrollView>
 
-        {/* Boton de emergencia */}
-        <TouchableOpacity style={styles.emergencyButton} onPress={llamarEmergencia}>
-          <Ionicons name="call" size={22} color="white" style={{ marginRight: 8 }} />
-          <Text style={styles.emergencyText}>
-            {emergency ? `Llamar a ${emergency.name}` : 'Llamar Emergencia'}
-          </Text>
-        </TouchableOpacity>
+        {/* History Modal */}
+        <Modal
+          visible={showHistory}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowHistory(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Historial de Identificaciones</Text>
+                <TouchableOpacity onPress={() => setShowHistory(false)}>
+                  <Ionicons name="close" size={28} color="#111418" />
+                </TouchableOpacity>
+              </View>
+              <FlatList
+                data={recents}
+                keyExtractor={(_, i) => String(i)}
+                contentContainerStyle={{ padding: 20 }}
+                renderItem={({ item }) => (
+                  <View style={styles.historyRow}>
+                    <View style={styles.historyPhotoBoxSmall}>
+                      {item.photo ? (
+                        <Image source={{ uri: item.photo }} style={styles.historyPhoto} />
+                      ) : (
+                        <Ionicons name="person" size={24} color="#9CA3AF" />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.historyName}>{item.name}</Text>
+                      <Text style={styles.historyRel}>{item.relationship}</Text>
+                    </View>
+                    <Text style={styles.historyTime}>{formatTime(item.timestamp!)}</Text>
+                  </View>
+                )}
+              />
+            </View>
+          </View>
+        </Modal>
 
       </View>
     </SafeAreaView>
@@ -162,146 +221,92 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: THEME.colors.background,
+  safe: { flex: 1, backgroundColor: 'white' },
+  container: { flex: 1, backgroundColor: '#F3F4F6' },
+  header: { 
+    height: 60, backgroundColor: 'white', 
+    flexDirection: 'row', alignItems: 'center', 
+    justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' 
   },
-  container: {
-    flex: 1,
-    paddingHorizontal: THEME.spacing.lg,
-    paddingTop: THEME.spacing.sm,
-    paddingBottom: THEME.spacing.lg,
+  headerTitle: { fontSize: 20, fontWeight: '800', color: '#111418' },
+  settingsBtn: { position: 'absolute', right: 20 },
+  greetingSection: { padding: 24, paddingTop: 32 },
+  greetingTitle: { fontSize: 32, fontWeight: '900', color: '#111418' },
+  greetingName: { fontSize: 32, fontWeight: '900', color: '#137fec' },
+  greetingSub: { fontSize: 18, color: '#6B7280', fontWeight: '500', marginTop: 4 },
+  identifyBtn: {
+    marginHorizontal: 24, backgroundColor: '#137fec', 
+    borderRadius: 32, paddingVertical: 48, alignItems: 'center',
+    shadowColor: '#137fec', shadowOffset: { width: 0, height: 8 }, 
+    shadowOpacity: 0.3, shadowRadius: 12, elevation: 6
   },
-  header: {
+  iconCircle: {
+    width: 100, height: 100, borderRadius: 50, 
+    backgroundColor: 'rgba(255,255,255,0.2)', 
+    alignItems: 'center', justifyContent: 'center', marginBottom: 20
+  },
+  identifyText: { fontSize: 28, fontWeight: '900', color: 'white' },
+  identifySubText: { fontSize: 16, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
+  recentsSection: { paddingHorizontal: 24, marginTop: 32 },
+  recentsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  recentsTitle: { fontSize: 20, fontWeight: '800', color: '#111418' },
+  seeAll: { fontSize: 14, fontWeight: '700', color: '#137fec' },
+  recentsGrid: { flexDirection: 'row', gap: 16 },
+  recentCard: { 
+    flex: 1, backgroundColor: 'white', borderRadius: 24, 
+    padding: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' 
+  },
+  recentPhotoBox: { 
+    width: 80, height: 80, borderRadius: 40, 
+    backgroundColor: '#F3F4F6', marginBottom: 12, 
+    overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 4, borderColor: '#f0f7ff'
+  },
+  recentPhoto: { width: '100%', height: '100%' },
+  recentName: { fontSize: 16, fontWeight: '800', color: '#111418' },
+  recentRel: { fontSize: 14, fontWeight: '700', color: '#137fec', marginTop: 2 },
+  recentTime: { fontSize: 12, color: '#9CA3AF', fontWeight: '600', marginTop: 6 },
+  emergencyShadowBox: {
+    marginHorizontal: 24,
+    marginTop: 32,
+    borderRadius: 24,
+    backgroundColor: 'transparent',
+  },
+  emergencyBtn: {
+    paddingVertical: 20, 
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: THEME.spacing.lg,
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: 12,
+    borderRadius: 24,
+    overflow: 'hidden', // Corta las esquinas blancas dentro del radio
   },
-  headerTitle: {
-    fontSize: THEME.fontSize.xl,
-    fontWeight: THEME.fontWeight.black,
-    color: THEME.colors.text,
-    letterSpacing: 0.5,
+  emergencyBtnActive: {
+    backgroundColor: '#DC2626',
   },
-  settingsButton: {
-    padding: 6,
+  emergencyBtnInactive: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
   },
-  greeting: {
-    marginBottom: THEME.spacing.lg,
+  emergencyBtnText: { color: 'white', fontSize: 22, fontWeight: '900' },
+  emergencyBtnTextInactive: { color: '#F87171', fontSize: 22, fontWeight: '900' },
+  emergencyHint: { textAlign: 'center', color: '#9CA3AF', fontSize: 12, marginTop: 8 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: 'white', borderTopLeftRadius: 32, borderTopRightRadius: 32, height: '85%' },
+  modalHeader: { 
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
+    padding: 24, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' 
   },
-  greetingText: {
-    fontSize: THEME.fontSize.xxl,
-    fontWeight: THEME.fontWeight.bold,
-    color: THEME.colors.text,
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#111418' },
+  historyRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, gap: 16 },
+  historyPhotoBoxSmall: { 
+    width: 56, height: 56, borderRadius: 28, 
+    backgroundColor: '#F3F4F6', overflow: 'hidden', 
+    alignItems: 'center', justifyContent: 'center' 
   },
-  greetingName: {
-    fontSize: THEME.fontSize.lg,
-    color: THEME.colors.textMuted,
-    fontWeight: THEME.fontWeight.medium,
-    marginTop: 2,
-  },
-  identifyButton: {
-    backgroundColor: THEME.colors.primary,
-    borderRadius: THEME.radius.xl,
-    paddingVertical: THEME.spacing.xl,
-    alignItems: 'center',
-    marginBottom: THEME.spacing.xl,
-    shadowColor: THEME.colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  identifyIconBox: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 60,
-    padding: THEME.spacing.lg,
-    marginBottom: THEME.spacing.md,
-  },
-  identifyTitle: {
-    fontSize: THEME.fontSize.xxl,
-    fontWeight: THEME.fontWeight.black,
-    color: 'white',
-    marginBottom: 4,
-  },
-  identifySubtitle: {
-    fontSize: THEME.fontSize.md,
-    color: 'rgba(255,255,255,0.85)',
-    fontWeight: THEME.fontWeight.medium,
-  },
-  section: {
-    flex: 1,
-    marginBottom: THEME.spacing.md,
-  },
-  sectionTitle: {
-    fontSize: THEME.fontSize.lg,
-    fontWeight: THEME.fontWeight.bold,
-    color: THEME.colors.text,
-    marginBottom: THEME.spacing.md,
-  },
-  emptyText: {
-    fontSize: THEME.fontSize.md,
-    color: THEME.colors.textMuted,
-    lineHeight: 24,
-  },
-  recentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: THEME.colors.card,
-    borderRadius: THEME.radius.md,
-    padding: THEME.spacing.md,
-    marginBottom: THEME.spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  recentPhoto: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    marginRight: THEME.spacing.md,
-  },
-  recentPhotoPlaceholder: {
-    backgroundColor: THEME.colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  recentInfo: {
-    flex: 1,
-  },
-  recentName: {
-    fontSize: THEME.fontSize.md,
-    fontWeight: THEME.fontWeight.bold,
-    color: THEME.colors.text,
-  },
-  recentRelationship: {
-    fontSize: THEME.fontSize.sm,
-    color: THEME.colors.primary,
-    fontWeight: THEME.fontWeight.medium,
-    marginTop: 2,
-  },
-  recentTime: {
-    fontSize: THEME.fontSize.sm,
-    color: THEME.colors.textLight,
-  },
-  emergencyButton: {
-    backgroundColor: THEME.colors.danger,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: THEME.radius.lg,
-    paddingVertical: THEME.spacing.md + 2,
-    shadowColor: THEME.colors.danger,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  emergencyText: {
-    color: 'white',
-    fontSize: THEME.fontSize.lg,
-    fontWeight: THEME.fontWeight.bold,
-  },
+  historyPhoto: { width: '100%', height: '100%' },
+  historyName: { fontSize: 16, fontWeight: '700', color: '#111418' },
+  historyRel: { fontSize: 14, color: '#137fec', fontWeight: '600' },
+  historyTime: { fontSize: 12, color: '#9CA3AF', fontWeight: '600' },
 });
